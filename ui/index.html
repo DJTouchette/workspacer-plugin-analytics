@@ -1,0 +1,300 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Analytics</title>
+<style>
+  /* Chrome wears workspacer theme tokens (injected into plugin webviews);
+     chart SERIES colors are the validated dataviz palette, stepped per
+     surface mode (data-mode set at runtime from the actual surface). */
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    --series-1: #3987e5; /* blue — spend/magnitude */
+    --series-2: #199e70; /* aqua — secondary sequential (tokens) */
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--wks-bg-base, #17171a);
+    color: var(--wks-text-primary, #dcdce6);
+    font-size: 13px;
+    overflow-y: auto;
+  }
+  body[data-mode="light"] { --series-1: #2a78d6; --series-2: #1baf7a; }
+  #root { max-width: 1060px; margin: 0 auto; padding: 18px 22px 32px; }
+
+  /* ── Header / filters (one row above the charts) ── */
+  #head { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+  #head h1 { font-size: 15px; font-weight: 650; margin: 0; letter-spacing: -0.01em; }
+  .seg { display: flex; gap: 2px; background: var(--wks-bg-raised, #1c1c20); border: 1px solid var(--wks-border-subtle, #2a2a2a); border-radius: 999px; padding: 2px; }
+  .seg button {
+    font-size: 11.5px; font-family: inherit; font-weight: 600; cursor: pointer;
+    padding: 3px 11px; border-radius: 999px; border: none; background: transparent;
+    color: var(--wks-text-muted, #999);
+  }
+  .seg button.on { background: var(--wks-accent, #5078c8); color: var(--wks-text-on-accent, #fff); }
+  #spacer { flex: 1; }
+
+  /* ── Stat tiles ── */
+  #tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 18px; }
+  .tile {
+    padding: 14px 16px; border-radius: 13px;
+    background: var(--wks-bg-raised, #1c1c20);
+    border: 1px solid var(--wks-border-subtle, #2a2a2a);
+  }
+  .tile .k { font-size: 10.5px; font-weight: 600; color: var(--wks-text-faint, #777); text-transform: uppercase; letter-spacing: 0.08em; }
+  .tile .v { font-size: 24px; font-weight: 700; margin-top: 7px; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+  .tile .s { font-size: 11px; color: var(--wks-text-muted, #999); margin-top: 3px; font-variant-numeric: tabular-nums; }
+
+  /* ── Cards ── */
+  .card {
+    background: var(--wks-bg-raised, #1c1c20);
+    border: 1px solid var(--wks-border-subtle, #2a2a2a);
+    border-radius: 13px; padding: 14px 16px; margin-bottom: 14px;
+  }
+  .card h2 { font-size: 10.5px; font-weight: 600; color: var(--wks-text-faint, #777); text-transform: uppercase; letter-spacing: 0.08em; margin: 0 0 12px; }
+  #grid3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin-bottom: 14px; }
+  #grid3 .card { margin-bottom: 0; }
+
+  /* ── Daily spend chart ── */
+  #daily { position: relative; }
+  #daily svg { display: block; width: 100%; height: 150px; }
+  #daily .grid line { stroke: var(--wks-border-subtle, #2a2a2a); stroke-width: 1; }
+  #daily .bar { fill: var(--series-1); rx: 0; }
+  #daily .bar:hover { filter: brightness(1.18); }
+  #daily text { fill: var(--wks-text-faint, #777); font-size: 9.5px; font-variant-numeric: tabular-nums; }
+  #tip {
+    position: fixed; pointer-events: none; z-index: 10; display: none;
+    background: var(--wks-bg-elevated, #222); border: 1px solid var(--wks-border, #333);
+    border-radius: 7px; padding: 6px 9px; font-size: 11px; line-height: 1.5;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.35); font-variant-numeric: tabular-nums;
+  }
+  #tip b { display: block; color: var(--wks-text-primary, #dcdce6); }
+  #tip span { color: var(--wks-text-muted, #999); }
+
+  /* ── Breakdown rows (horizontal bars, one hue + labels) ── */
+  .brow { display: grid; grid-template-columns: 110px 1fr 74px; align-items: center; gap: 8px; padding: 3.5px 0; font-size: 11.5px; }
+  .brow .n { color: var(--wks-text-secondary, #bbb); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .brow .track { height: 12px; border-radius: 3px; position: relative; }
+  .brow .fill { position: absolute; inset: 0 auto 0 0; border-radius: 0 4px 4px 0; background: var(--series-1); min-width: 2px; }
+  .brow .val { text-align: right; color: var(--wks-text-muted, #999); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .brow:hover .fill { filter: brightness(1.18); }
+
+  /* ── Table ── */
+  table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+  th { text-align: left; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.07em; color: var(--wks-text-faint, #777); padding: 4px 8px 8px; border-bottom: 1px solid var(--wks-border-subtle, #2a2a2a); }
+  th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td { padding: 6px 8px; color: var(--wks-text-secondary, #bbb); border-bottom: 1px solid color-mix(in srgb, var(--wks-border-subtle, #2a2a2a) 55%, transparent); white-space: nowrap; }
+  td.agent { color: var(--wks-text-primary, #dcdce6); font-weight: 600; }
+  td .dim { color: var(--wks-text-faint, #777); }
+  tr:hover td { background: color-mix(in srgb, var(--wks-bg-hover, #26262c) 60%, transparent); }
+
+  .empty { padding: 40px 0; text-align: center; color: var(--wks-text-faint, #777); font-size: 12.5px; }
+</style>
+</head>
+<body>
+  <div id="root">
+    <div id="head">
+      <h1>Analytics</h1>
+      <span id="spacer"></span>
+      <div class="seg" id="range"></div>
+      <div class="seg" id="prov"></div>
+    </div>
+    <div id="content"><div class="empty">Loading…</div></div>
+  </div>
+  <div id="tip"></div>
+
+<script>
+(() => {
+  'use strict';
+  // ── Hub bus boilerplate ──
+  const params = new URLSearchParams(location.search);
+  const token = params.get('busToken') || '';
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const ws = new WebSocket(`${proto}//${location.host}/bus?token=${encodeURIComponent(token)}`);
+  let seq = 1;
+  const pending = new Map();
+  function call(method, p = {}) {
+    return new Promise((resolve, reject) => {
+      const id = 'c' + seq++;
+      pending.set(id, { resolve, reject });
+      ws.send(JSON.stringify({ op: 'call', id, method, params: p }));
+    });
+  }
+  ws.onmessage = (ev) => {
+    let f; try { f = JSON.parse(ev.data); } catch { return; }
+    const c = f.id && pending.get(f.id);
+    if (!c) return;
+    pending.delete(f.id);
+    if (f.op === 'result') c.resolve(f.result);
+    else c.reject(new Error(f.error || 'error'));
+  };
+
+  // Pick chart-series steps for the ACTUAL surface (theme ≠ OS scheme).
+  const bg = getComputedStyle(document.body).backgroundColor.match(/\d+/g) || [23, 23, 26];
+  const lum = (0.2126 * bg[0] + 0.7152 * bg[1] + 0.0722 * bg[2]) / 255;
+  document.body.dataset.mode = lum > 0.5 ? 'light' : 'dark';
+
+  // ── State ──
+  const RANGES = [ ['7d', 7], ['30d', 30], ['90d', 90], ['All', null] ];
+  const PROVIDERS = [ ['all', 'All'], ['claude', 'Claude'], ['codex', 'Codex'], ['opencode', 'OpenCode'], ['pi', 'Pi'] ];
+  let range = localStorage.getItem('anRange') || '30d';
+  let provider = localStorage.getItem('anProv') || 'all';
+
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const usd = (n) => (n >= 0.01 ? '$' + n.toFixed(2) : n > 0 ? '<$0.01' : '$0.00');
+  const tok = (n) => (n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : String(n));
+  const dur = (ms) => {
+    const m = Math.round(ms / 60000);
+    if (m < 60) return m + 'm';
+    const h = Math.floor(m / 60);
+    return h < 48 ? `${h}h ${m % 60}m` : Math.round(h / 24) + 'd';
+  };
+  const base = (p) => (p ? p.replace(/[/\\]+$/, '').split(/[/\\]/).pop() : '(none)');
+  const shortModel = (m) => {
+    if (!m) return '(unknown)';
+    const x = m.replace(/^.*\//, '').replace(/-\d{8}$/, '');
+    return x.replace(/^claude-/, '').replace(/^gpt-/, 'gpt-');
+  };
+  const provLabel = (k) => ({ claude: 'Claude', codex: 'Codex', opencode: 'OpenCode', pi: 'Pi' })[k] || (k || '(unknown)');
+
+  function renderSeg(el, items, cur, onPick) {
+    el.innerHTML = items.map(([v, l]) => `<button data-v="${v}" class="${v === cur ? 'on' : ''}">${l}</button>`).join('');
+    for (const b of el.querySelectorAll('button')) b.onclick = () => onPick(b.dataset.v);
+  }
+
+  async function refresh() {
+    renderSeg($('range'), RANGES.map(([l]) => [l, l]), range, (v) => { range = v; localStorage.setItem('anRange', v); refresh(); });
+    renderSeg($('prov'), PROVIDERS, provider, (v) => { provider = v; localStorage.setItem('anProv', v); refresh(); });
+    const days = { '7d': 7, '30d': 30, '90d': 90 }[range] ?? null;
+    const since = days ? new Date(Date.now() - days * 864e5).toISOString() : undefined;
+    const prov = provider === 'all' ? undefined : provider;
+    let summary, recent;
+    try {
+      [summary, recent] = await Promise.all([
+        call('analytics.summary', { provider: prov, since }),
+        call('analytics.recent', { limit: 25, provider: prov, since }),
+      ]);
+    } catch (e) {
+      $('content').innerHTML = `<div class="empty">Analytics unavailable: ${esc(e.message)}</div>`;
+      return;
+    }
+    render(summary, recent || []);
+  }
+
+  function render(s, recent) {
+    const t = s?.totals;
+    if (!t || t.sessions === 0) {
+      $('content').innerHTML = '<div class="empty">No sessions recorded in this window yet.<br/>Run some agents and come back.</div>';
+      return;
+    }
+    $('content').innerHTML = `
+      <div id="tiles">
+        ${tile('Sessions', String(t.sessions))}
+        ${tile('Total spend', usd(t.costUSD))}
+        ${tile('Tokens', tok(t.inputTokens + t.outputTokens), `${tok(t.inputTokens)} in · ${tok(t.outputTokens)} out`)}
+        ${tile('Tool calls', tok(t.toolCalls))}
+        ${tile('Time agented', dur(t.durationMs), t.workflowRuns ? `${t.workflowRuns} workflow runs` : '')}
+      </div>
+      <div class="card" id="daily"><h2>Daily spend</h2>${dailyChart(s.byDay)}</div>
+      <div id="grid3">
+        ${breakdown('By model', s.byModel, (k) => shortModel(k))}
+        ${breakdown('By project', s.byProject, (k) => base(k))}
+        ${breakdown('By provider', s.byProvider, (k) => provLabel(k))}
+      </div>
+      <div class="card"><h2>Recent sessions</h2>${table(recent)}</div>`;
+    wireDailyHover(s.byDay);
+  }
+
+  const tile = (k, v, sub = '') =>
+    `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div>${sub ? `<div class="s">${sub}</div>` : ''}</div>`;
+
+  // ── Daily spend: thin baseline-anchored bars, 4px rounded data ends, 2px
+  //    gaps, recessive gridlines, direct label on the peak day only. ──
+  function dailyChart(byDay) {
+    const days = [...(byDay || [])].sort((a, b) => (a.key < b.key ? -1 : 1));
+    if (days.length === 0) return '<div class="empty">No daily data.</div>';
+    const W = 1000, H = 150, PADB = 16, PADT = 14;
+    const max = Math.max(...days.map((d) => d.costUSD), 0.01);
+    const bw = Math.max(2, Math.min(26, W / days.length - 2));
+    const step = W / days.length;
+    const y = (v) => PADT + (H - PADT - PADB) * (1 - v / max);
+    const grid = [0.5, 1].map((f) =>
+      `<line x1="0" x2="${W}" y1="${y(max * f)}" y2="${y(max * f)}"/>`).join('');
+    const peak = days.reduce((a, b) => (b.costUSD > a.costUSD ? b : a));
+    const bars = days.map((d, i) => {
+      const x = i * step + (step - bw) / 2;
+      const h = Math.max(1.5, H - PADB - y(d.costUSD));
+      const lbl = d === peak && d.costUSD > 0
+        ? `<text x="${x + bw / 2}" y="${y(d.costUSD) - 4}" text-anchor="middle" style="fill:var(--wks-text-secondary,#bbb);font-weight:600">${usd(d.costUSD)}</text>` : '';
+      // Rounded DATA end only: clip a 4px-radius rect against the baseline.
+      return `<g class="barg" data-i="${i}">
+        <rect class="bar" x="${x}" y="${y(d.costUSD)}" width="${bw}" height="${h + 4}" rx="4" clip-path="inset(0 0 4px 0)"/>
+        <rect x="${x - 1}" y="${PADT}" width="${bw + 2}" height="${H - PADT - PADB}" fill="transparent"/>
+        ${lbl}</g>`;
+    }).join('');
+    const firstD = days[0].key.slice(5), lastD = days[days.length - 1].key.slice(5);
+    return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+      <g class="grid">${grid}<line x1="0" x2="${W}" y1="${H - PADB}" y2="${H - PADB}"/></g>
+      ${bars}
+      <text x="0" y="${H - 3}">${firstD}</text>
+      <text x="${W}" y="${H - 3}" text-anchor="end">${lastD}</text>
+    </svg>`;
+  }
+
+  function wireDailyHover(byDay) {
+    const days = [...(byDay || [])].sort((a, b) => (a.key < b.key ? -1 : 1));
+    const tip = $('tip');
+    for (const g of document.querySelectorAll('#daily .barg')) {
+      const d = days[Number(g.dataset.i)];
+      if (!d) continue;
+      g.addEventListener('mousemove', (e) => {
+        tip.style.display = 'block';
+        tip.innerHTML = `<b>${d.key}</b><span>${usd(d.costUSD)} · ${d.sessions} session${d.sessions === 1 ? '' : 's'} · ${tok(d.tokens)} tok</span>`;
+        tip.style.left = Math.min(e.clientX + 12, innerWidth - tip.offsetWidth - 8) + 'px';
+        tip.style.top = e.clientY + 14 + 'px';
+      });
+      g.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+    }
+  }
+
+  // Top 7 + folded "Other" — a magnitude comparison in ONE hue; identity is
+  // carried by the row labels, so no rainbow and no legend needed.
+  function breakdown(title, buckets, labelOf) {
+    const rows = [...(buckets || [])].sort((a, b) => b.costUSD - a.costUSD);
+    const top = rows.slice(0, 7);
+    const rest = rows.slice(7);
+    if (rest.length) {
+      top.push(rest.reduce((acc, r) => ({ key: `(${rest.length} more)`, costUSD: acc.costUSD + r.costUSD, sessions: acc.sessions + r.sessions, tokens: acc.tokens + r.tokens }), { key: '', costUSD: 0, sessions: 0, tokens: 0 }));
+    }
+    const max = Math.max(...top.map((r) => r.costUSD), 0.001);
+    const body = top.map((r) => `
+      <div class="brow" title="${esc(r.key)} — ${usd(r.costUSD)} · ${r.sessions} sessions · ${tok(r.tokens)} tok">
+        <span class="n">${esc(r.key.startsWith('(') ? r.key : labelOf(r.key))}</span>
+        <span class="track"><span class="fill" style="width:${Math.max(1, (r.costUSD / max) * 100)}%"></span></span>
+        <span class="val">${usd(r.costUSD)}</span>
+      </div>`).join('');
+    return `<div class="card"><h2>${title}</h2>${body || '<div class="empty">Nothing here.</div>'}</div>`;
+  }
+
+  function table(recent) {
+    if (!recent.length) return '<div class="empty">No sessions.</div>';
+    const rows = recent.map((r) => `
+      <tr>
+        <td class="agent">${esc(r.agentName || base(r.cwd))}</td>
+        <td>${esc(base(r.cwd))}${r.gitBranch ? ` <span class="dim">⎇ ${esc(r.gitBranch)}</span>` : ''}</td>
+        <td>${esc(provLabel(r.provider || 'claude'))} <span class="dim">${esc(shortModel(r.model))}</span></td>
+        <td class="num">${dur(r.durationMs)}</td>
+        <td class="num">${tok(r.inputTokens + r.outputTokens)}</td>
+        <td class="num">${usd(r.costUSD)}</td>
+      </tr>`).join('');
+    return `<table>
+      <thead><tr><th>Agent</th><th>Project</th><th>Model</th><th class="num">Time</th><th class="num">Tokens</th><th class="num">Cost</th></tr></thead>
+      <tbody>${rows}</tbody></table>`;
+  }
+
+  ws.onopen = refresh;
+  ws.onclose = () => { $('content').innerHTML = '<div class="empty">Bus disconnected.</div>'; };
+})();
+</script>
+</body>
+</html>

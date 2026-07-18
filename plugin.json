@@ -1,0 +1,15 @@
+{
+  "id": "djtouchette.analytics",
+  "name": "Analytics",
+  "apiVersion": "1",
+  "ui": "ui",
+  "panes": [
+    {
+      "type": "djtouchette.analytics",
+      "title": "Analytics",
+      "icon": "📊",
+      "scope": "global"
+    }
+  ],
+  "capabilities": ["analytics.summary", "analytics.recent"]
+}
