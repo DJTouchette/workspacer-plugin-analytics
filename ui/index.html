@@ -105,28 +105,10 @@
 <script>
 (() => {
   'use strict';
-  // ── Hub bus boilerplate ──
-  const params = new URLSearchParams(location.search);
-  const token = params.get('busToken') || '';
-  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const ws = new WebSocket(`${proto}//${location.host}/bus?token=${encodeURIComponent(token)}`);
-  let seq = 1;
-  const pending = new Map();
-  function call(method, p = {}) {
-    return new Promise((resolve, reject) => {
-      const id = 'c' + seq++;
-      pending.set(id, { resolve, reject });
-      ws.send(JSON.stringify({ op: 'call', id, method, params: p }));
-    });
-  }
-  ws.onmessage = (ev) => {
-    let f; try { f = JSON.parse(ev.data); } catch { return; }
-    const c = f.id && pending.get(f.id);
-    if (!c) return;
-    pending.delete(f.id);
-    if (f.op === 'result') c.resolve(f.result);
-    else c.reject(new Error(f.error || 'error'));
-  };
+  // ── Bus via the host-injected SDK: window.workspacer owns the socket,
+  //    subscribe, reconnect, and the call/publish/on framing. ──
+  const wks = window.workspacer;
+  const call = (method, p = {}) => wks.call(method, p);
 
   // Pick chart-series steps for the ACTUAL surface (theme ≠ OS scheme).
   const bg = getComputedStyle(document.body).backgroundColor.match(/\d+/g) || [23, 23, 26];
@@ -292,8 +274,12 @@
       <tbody>${rows}</tbody></table>`;
   }
 
-  ws.onopen = refresh;
-  ws.onclose = () => { $('content').innerHTML = '<div class="empty">Bus disconnected.</div>'; };
+  // onStatus fires true on every (re)connect and false on disconnect, so the
+  // view seeds on connect and recovers after a reconnect.
+  wks.onStatus((on) => {
+    if (on) refresh();
+    else $('content').innerHTML = '<div class="empty">Bus disconnected.</div>';
+  });
 })();
 </script>
 </body>
