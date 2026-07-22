@@ -2,6 +2,7 @@
   "id": "djtouchette.analytics",
   "name": "Analytics",
   "apiVersion": "1",
+  "version": "1.0.0",
   "ui": "ui",
   "panes": [
     {
